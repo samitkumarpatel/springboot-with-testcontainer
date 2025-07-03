@@ -9,7 +9,9 @@ import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowClientOptions;
 import io.temporal.client.WorkflowOptions;
 import io.temporal.serviceclient.WorkflowServiceStubs;
+import io.temporal.serviceclient.WorkflowServiceStubsOptions;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
@@ -23,8 +25,11 @@ import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.RouterFunctions;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
+import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 @SpringBootApplication
 public class SpringbootWithTestcontainerApplication {
@@ -34,9 +39,14 @@ public class SpringbootWithTestcontainerApplication {
 	}
 
 	@Bean
-	WorkflowClient workflowClient() {
+	WorkflowClient workflowClient(@Value("${spring.application.temporal.host}") String temporalServerAddress) {
+		var workflowServiceFlowService = WorkflowServiceStubsOptions.newBuilder()
+				.setTarget(temporalServerAddress) // Temporal server address
+				.build();
+
 		return WorkflowClient.newInstance(
-				WorkflowServiceStubs.newLocalServiceStubs(),
+				/*WorkflowServiceStubs.newLocalServiceStubs(),*/
+				WorkflowServiceStubs.newServiceStubs(workflowServiceFlowService),
 				WorkflowClientOptions.newBuilder().build());
 	}
 
@@ -120,12 +130,20 @@ class AccountActivityImpl implements AccountActivity {
 class TransferService {
 	final WorkflowClient workflowClient;
 
-	public Mono<WorkflowExecution> transfer(Transaction transaction) {
+	public Mono<Map<String,Object>> transfer(Transaction transaction) {
+		var uuid = UUID.randomUUID().toString();
 		TransferWorkflow transferWorkflow = workflowClient
 				.newWorkflowStub(
 						TransferWorkflow.class,
-						WorkflowOptions.newBuilder().setTaskQueue("MONEY_TRANSFER_TASK_QUEUE").setWorkflowId("money-transfer-workflow").build()
+						WorkflowOptions.newBuilder().setTaskQueue("MONEY_TRANSFER_TASK_QUEUE").setWorkflowId(uuid).build()
 				);
-		return Mono.fromCallable(() -> WorkflowClient.start(transferWorkflow::transfer,new Transaction("account1", "account2", 100.0)));
+		return Mono
+				.fromRunnable(() -> WorkflowClient.start(transferWorkflow::transfer, transaction))
+				.subscribeOn(Schedulers.boundedElastic())
+				.then(
+						Mono.just(
+								Map.of("uuid", uuid, "status", "Transfer initiated")
+						)
+				);
 	}
 }

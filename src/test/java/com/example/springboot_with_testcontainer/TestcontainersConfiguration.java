@@ -44,7 +44,8 @@ class TestcontainersConfiguration {
 								.run("mv temporal /usr/local/bin")
 								.cmd("temporal", "server", "start-dev", "--ui-ip=0.0.0.0", "--log-config")
 								.build()))
-				.withExposedPorts(8233, 7233);
+				.withExposedPorts(8233, 7233)
+				.withAccessToHost(true);
 	}
 
 }
