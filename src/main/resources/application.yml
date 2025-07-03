@@ -1,0 +1,5 @@
+spring:
+  application:
+    name: springboot-with-testcontainer
+server:
+  shutdown: immediate
