@@ -2,6 +2,7 @@ package com.example.springboot_with_testcontainer;
 
 import com.example.springboot_with_testcontainer.model.Transaction;
 import com.example.springboot_with_testcontainer.temporal.TransferWorkflow;
+import com.example.springboot_with_testcontainer.temporal.TransferWorkflowImpl;
 import io.temporal.activity.ActivityInterface;
 import io.temporal.activity.ActivityMethod;
 import io.temporal.api.common.v1.WorkflowExecution;
@@ -10,11 +11,14 @@ import io.temporal.client.WorkflowClientOptions;
 import io.temporal.client.WorkflowOptions;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 import io.temporal.serviceclient.WorkflowServiceStubsOptions;
+import io.temporal.worker.WorkerFactory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.MongoId;
 import org.springframework.data.mongodb.repository.ReactiveMongoRepository;
@@ -45,9 +49,22 @@ public class SpringbootWithTestcontainerApplication {
 				.build();
 
 		return WorkflowClient.newInstance(
-				/*WorkflowServiceStubs.newLocalServiceStubs(),*/
-				WorkflowServiceStubs.newServiceStubs(workflowServiceFlowService),
+				WorkflowServiceStubs.newLocalServiceStubs(),
+				/*WorkflowServiceStubs.newServiceStubs(workflowServiceFlowService),*/
 				WorkflowClientOptions.newBuilder().build());
+	}
+
+	@Bean
+	WorkerFactory transferWorkflowWorkerFactory(WorkflowClient workflowClient) {
+		var workerFactory = WorkerFactory.newInstance(workflowClient);
+		var worker = workerFactory.newWorker("MONEY_TRANSFER_TASK_QUEUE");
+		worker.registerWorkflowImplementationTypes(TransferWorkflowImpl.class);
+		return workerFactory;
+	}
+
+	@EventListener(ApplicationReadyEvent.class)
+	void startWorker(WorkerFactory transferWorkflowWorkerFactory) {
+		transferWorkflowWorkerFactory.start();
 	}
 
 	@Bean
@@ -132,10 +149,14 @@ class TransferService {
 
 	public Mono<Map<String,Object>> transfer(Transaction transaction) {
 		var uuid = UUID.randomUUID().toString();
+
 		TransferWorkflow transferWorkflow = workflowClient
 				.newWorkflowStub(
 						TransferWorkflow.class,
-						WorkflowOptions.newBuilder().setTaskQueue("MONEY_TRANSFER_TASK_QUEUE").setWorkflowId(uuid).build()
+						WorkflowOptions.newBuilder()
+								.setTaskQueue("MONEY_TRANSFER_TASK_QUEUE")
+								.setWorkflowId(uuid)
+								.build()
 				);
 		return Mono
 				.fromRunnable(() -> WorkflowClient.start(transferWorkflow::transfer, transaction))

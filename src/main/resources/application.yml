@@ -1,7 +1,9 @@
+server:
+  shutdown: immediate
+
 spring:
   application:
     name: springboot-with-testcontainer
     temporal:
-      host: localhost:32787
-server:
-  shutdown: immediate
+      host: localhost:7233
+

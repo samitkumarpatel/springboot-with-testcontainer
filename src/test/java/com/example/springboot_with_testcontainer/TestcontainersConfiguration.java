@@ -32,20 +32,20 @@ class TestcontainersConfiguration {
 	}
 
 
-	@Bean
-	GenericContainer<?> temporalContainer() {
-		return new GenericContainer<>(new ImageFromDockerfile()
-				.withDockerfileFromBuilder(builder ->
-						builder
-								.from("alpine:latest")
-								.run("wget 'https://temporal.download/cli/archive/latest?platform=linux&arch=amd64' -O temporal_cli_latest_linux_amd64.tar.gz")
-								.run("tar -xf temporal_cli_latest_linux_amd64.tar.gz")
-								.run("rm temporal_cli_latest_linux_amd64.tar.gz")
-								.run("mv temporal /usr/local/bin")
-								.cmd("temporal", "server", "start-dev", "--ui-ip=0.0.0.0", "--log-config")
-								.build()))
-				.withExposedPorts(8233, 7233)
-				.withAccessToHost(true);
-	}
+//	@Bean
+//	GenericContainer<?> temporalContainer() {
+//		return new GenericContainer<>(new ImageFromDockerfile()
+//				.withDockerfileFromBuilder(builder ->
+//						builder
+//								.from("alpine:latest")
+//								.run("wget 'https://temporal.download/cli/archive/latest?platform=linux&arch=amd64' -O temporal_cli_latest_linux_amd64.tar.gz")
+//								.run("tar -xf temporal_cli_latest_linux_amd64.tar.gz")
+//								.run("rm temporal_cli_latest_linux_amd64.tar.gz")
+//								.run("mv temporal /usr/local/bin")
+//								.cmd("temporal", "server", "start-dev", "--ui-ip=0.0.0.0", "--log-config")
+//								.build()))
+//				.withExposedPorts(8233, 7233)
+//				.withAccessToHost(true);
+//	}
 
 }

@@ -1,0 +1,8 @@
+services:
+  temporal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "7233:7233"
+      - "8233:8233"
