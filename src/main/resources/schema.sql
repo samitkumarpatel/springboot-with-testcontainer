@@ -1,0 +1,5 @@
+CREATE TABLE account (
+     id BIGSERIAL PRIMARY KEY,
+     name VARCHAR(100) NOT NULL,
+     amount DECIMAL(10, 2) NOT NULL
+);

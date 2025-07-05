@@ -6,3 +6,8 @@ services:
     ports:
       - "7233:7233"
       - "8233:8233"
+#  temporal:
+#    image: temporalio/auto-setup:latest
+#    ports:
+#      - "7233:7233"
+#      - "8233:8233"

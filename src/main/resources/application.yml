@@ -6,4 +6,7 @@ spring:
     name: springboot-with-testcontainer
     temporal:
       host: localhost:7233
+logging:
+  level:
+    org.springframework.data: DEBUG
 
