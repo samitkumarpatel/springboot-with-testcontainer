@@ -28,8 +28,10 @@ public class TransferWorkflowImpl implements TransferWorkflow {
     public void transfer(Transaction transaction) {
         System.out.println("Transferring " + transaction.amount() + " from " + transaction.from() + " to " + transaction.to());
 
+        boolean withdrawn = false;
         try {
             accountActivity.withdraw(transaction.from(), uuid.toString(), transaction.amount());
+            withdrawn = true;
             accountActivity.deposit(transaction.to(), uuid.toString(), transaction.amount());
             accountActivity.notification(transaction.from(), uuid.toString(), transaction.amount(), "Transfer successful to " + transaction.to());
             accountActivity.notification(transaction.to(), uuid.toString(), transaction.amount(), "Transfer received from " + transaction.from());
@@ -37,9 +39,13 @@ public class TransferWorkflowImpl implements TransferWorkflow {
             System.out.println(a.getMessage());
             throw a;
         } catch (RuntimeException e) {
-            System.out.println("Transfer failed, refunding " + transaction.amount() + " to " + transaction.from());
-            accountActivity.refund(transaction.from(), uuid.toString(), transaction.amount());
-            throw e; // rethrow the exception to signal failure
+            if (withdrawn) {
+                System.out.println("Transfer failed after withdrawal, refunding " + transaction.amount() + " to " + transaction.from());
+                accountActivity.refund(transaction.from(), uuid.toString(), transaction.amount());
+            } else {
+                System.out.println("Transfer failed before withdrawal, no refund needed.");
+            }
+            throw e;
         }
     }
 }

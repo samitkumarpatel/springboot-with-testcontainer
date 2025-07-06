@@ -1,11 +1,10 @@
 package com.example.springboot_with_testcontainer;
 
 import com.example.springboot_with_testcontainer.model.Account;
+import com.example.springboot_with_testcontainer.model.Customer;
 import com.example.springboot_with_testcontainer.model.Transaction;
 import com.example.springboot_with_testcontainer.repository.AccountRepository;
-import com.example.springboot_with_testcontainer.temporal.TransferActivityImpl;
-import com.example.springboot_with_testcontainer.temporal.TransferWorkflow;
-import com.example.springboot_with_testcontainer.temporal.TransferWorkflowImpl;
+import com.example.springboot_with_testcontainer.temporal.*;
 import com.example.springboot_with_testcontainer.utility.AccountNotFoundException;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowClientOptions;
@@ -54,15 +53,25 @@ public class SpringbootWithTestcontainerApplication {
 	ApplicationListener<ApplicationReadyEvent> onApplicationReady(WorkflowClient workflowClient, TransferActivityImpl transferActivity) {
 		return event -> {
 			var workerFactory = WorkerFactory.newInstance(workflowClient);
-			var worker = workerFactory.newWorker("MONEY_TRANSFER_TASK_QUEUE");
-			worker.registerWorkflowImplementationTypes(TransferWorkflowImpl.class);
-			worker.registerActivitiesImplementations(transferActivity);
+			//money transferWorker
+			var moneyTransferWorker = workerFactory.newWorker("MONEY_TRANSFER_TASK_QUEUE");
+			moneyTransferWorker.registerWorkflowImplementationTypes(TransferWorkflowImpl.class);
+			moneyTransferWorker.registerActivitiesImplementations(transferActivity);
+
+			//user creation worker
+			var userCreationWorkflow = workerFactory.newWorker("USER_CREATION_TASK_QUEUE");
+			userCreationWorkflow.registerWorkflowImplementationTypes(UserCreationWorkflowImpl.class);
+			userCreationWorkflow.registerActivitiesImplementations(new UserCreationActivityImpl());
+
 			workerFactory.start();
 		};
 	}
 
 	@Bean
-	RouterFunction<ServerResponse> routerFunction(AccountRepository accountRepository, TransferService transferService) {
+	RouterFunction<ServerResponse> routerFunction(
+			AccountRepository accountRepository,
+			TransferService transferService,
+			UserCreationService userCreationService) {
 		return RouterFunctions
 				.route()
 				.path("/account", builder -> builder
@@ -89,6 +98,13 @@ public class SpringbootWithTestcontainerApplication {
 								request
 										.bodyToMono(Transaction.class)
 												.flatMap(transferService::transfer)
+												.flatMap(ServerResponse.ok()::bodyValue))
+				)
+				.path("/user", builder -> builder
+						.POST("", request ->
+								request
+										.bodyToMono(Customer.class)
+												.flatMap(userCreationService::createUser)
 												.flatMap(ServerResponse.ok()::bodyValue))
 				)
 				.build();
@@ -118,6 +134,33 @@ class TransferService {
 				.then(
 						Mono.just(
 								Map.of("uuid", uuid, "status", "Transfer initiated")
+						)
+				);
+	}
+}
+
+@Service
+@RequiredArgsConstructor
+class UserCreationService {
+	final WorkflowClient workflowClient;
+
+	public Mono<Map<String,Object>> createUser(Customer customer) {
+		var uuid = UUID.randomUUID().toString();
+
+		UserCreationWorkflow userCreationWorkflow = workflowClient
+				.newWorkflowStub(
+						UserCreationWorkflow.class,
+						WorkflowOptions.newBuilder()
+								.setTaskQueue("USER_CREATION_TASK_QUEUE")
+								.setWorkflowId(uuid)
+								.build()
+				);
+		return Mono
+				.fromRunnable(() -> WorkflowClient.start(userCreationWorkflow::newUserFlow, customer))
+				.subscribeOn(Schedulers.boundedElastic())
+				.then(
+						Mono.just(
+								Map.of("uuid", uuid, "status", "User creation initiated")
 						)
 				);
 	}
