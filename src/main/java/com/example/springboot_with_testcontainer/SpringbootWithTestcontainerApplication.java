@@ -4,8 +4,12 @@ import com.example.springboot_with_testcontainer.model.Account;
 import com.example.springboot_with_testcontainer.model.Customer;
 import com.example.springboot_with_testcontainer.model.Transaction;
 import com.example.springboot_with_testcontainer.repository.AccountRepository;
+import com.example.springboot_with_testcontainer.repository.CustomerRepository;
 import com.example.springboot_with_testcontainer.temporal.*;
 import com.example.springboot_with_testcontainer.utility.AccountNotFoundException;
+import io.grpc.Server;
+import io.temporal.api.workflowservice.v1.ListWorkflowExecutionsRequest;
+import io.temporal.api.workflowservice.v1.ListWorkflowExecutionsResponse;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowClientOptions;
 import io.temporal.client.WorkflowOptions;
@@ -26,9 +30,11 @@ import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @SpringBootApplication
 public class SpringbootWithTestcontainerApplication {
@@ -50,7 +56,7 @@ public class SpringbootWithTestcontainerApplication {
 	}
 
 	@Bean
-	ApplicationListener<ApplicationReadyEvent> onApplicationReady(WorkflowClient workflowClient, TransferActivityImpl transferActivity) {
+	ApplicationListener<ApplicationReadyEvent> onApplicationReady(WorkflowClient workflowClient, TransferActivityImpl transferActivity, UserCreationActivityImpl userCreationActivityImpl) {
 		return event -> {
 			var workerFactory = WorkerFactory.newInstance(workflowClient);
 			//money transferWorker
@@ -61,7 +67,7 @@ public class SpringbootWithTestcontainerApplication {
 			//user creation worker
 			var userCreationWorkflow = workerFactory.newWorker("USER_CREATION_TASK_QUEUE");
 			userCreationWorkflow.registerWorkflowImplementationTypes(UserCreationWorkflowImpl.class);
-			userCreationWorkflow.registerActivitiesImplementations(new UserCreationActivityImpl());
+			userCreationWorkflow.registerActivitiesImplementations(userCreationActivityImpl);
 
 			workerFactory.start();
 		};
@@ -71,7 +77,8 @@ public class SpringbootWithTestcontainerApplication {
 	RouterFunction<ServerResponse> routerFunction(
 			AccountRepository accountRepository,
 			TransferService transferService,
-			UserCreationService userCreationService) {
+			UserCreationService userCreationService,
+			CustomerRepository customerRepository) {
 		return RouterFunctions
 				.route()
 				.path("/account", builder -> builder
@@ -101,11 +108,16 @@ public class SpringbootWithTestcontainerApplication {
 												.flatMap(ServerResponse.ok()::bodyValue))
 				)
 				.path("/user", builder -> builder
+						.GET("", request -> customerRepository.findAll().collectList().flatMap(ServerResponse.ok()::bodyValue))
 						.POST("", request ->
 								request
 										.bodyToMono(Customer.class)
 												.flatMap(userCreationService::createUser)
 												.flatMap(ServerResponse.ok()::bodyValue))
+						.GET("/approval-queue", request -> Mono.fromCallable(userCreationService::getAllUserCreationWorkflowIds).flatMap(ServerResponse.ok()::bodyValue))
+						.GET("/approval-queue/{id}", request -> Mono.fromCallable(() -> userCreationService.getUserInApprovalQueueByWorkflowId(request.pathVariable("id"))).flatMap(ServerResponse.ok()::bodyValue))
+						.POST("/approval-queue/{id}/approve", request -> Mono.fromRunnable(() -> userCreationService.approveUser(request.pathVariable("id"))).then(ServerResponse.ok().build()))
+						.POST("/approval-queue/{id}/reject", request -> Mono.fromRunnable(() -> userCreationService.rejectUser(request.pathVariable("id"))).then(ServerResponse.ok().build()))
 				)
 				.build();
 	}
@@ -163,5 +175,54 @@ class UserCreationService {
 								Map.of("uuid", uuid, "status", "User creation initiated")
 						)
 				);
+	}
+
+	void approveUser(String id) {
+		UserCreationWorkflow userCreationWorkflow = workflowClient.newWorkflowStub(UserCreationWorkflow.class, id);
+		Customer customer = userCreationWorkflow.getCustomer();
+		if (customer != null) {
+			userCreationWorkflow.approved(customer);
+		} else {
+			throw new IllegalStateException("No customer found for approval");
+		}
+	}
+
+	void rejectUser(String id) {
+		UserCreationWorkflow userCreationWorkflow = workflowClient.newWorkflowStub(UserCreationWorkflow.class, id);
+		Customer customer = userCreationWorkflow.getCustomer();
+		if (customer != null) {
+			userCreationWorkflow.rejected(customer);
+		} else {
+			throw new IllegalStateException("No customer found for approval");
+		}
+	}
+
+	List<String> getAllUserCreationWorkflowIds() {
+		ListWorkflowExecutionsRequest listWorkflowExecutionRequest =
+				ListWorkflowExecutionsRequest.newBuilder()
+						.setNamespace(workflowClient.getOptions().getNamespace())
+						.setQuery("WorkflowType='UserCreationWorkflow' AND ExecutionStatus='Running'")
+						.build();
+		ListWorkflowExecutionsResponse listWorkflowExecutionsResponse = workflowClient
+				.getWorkflowServiceStubs()
+				.blockingStub()
+				.listWorkflowExecutions(listWorkflowExecutionRequest);
+
+
+		return listWorkflowExecutionsResponse
+				.getExecutionsList()
+				.stream()
+				.map(e -> e.getExecution().getWorkflowId())
+				.toList();
+	}
+
+	Customer getUserInApprovalQueueByWorkflowId(String id) {
+		UserCreationWorkflow userCreationWorkflow = workflowClient.newWorkflowStub(UserCreationWorkflow.class, id);
+		Customer customer = userCreationWorkflow.getCustomer();
+		if (customer != null) {
+			return customer;
+		} else {
+			throw new IllegalStateException("No customer found for the given workflow ID");
+		}
 	}
 }
