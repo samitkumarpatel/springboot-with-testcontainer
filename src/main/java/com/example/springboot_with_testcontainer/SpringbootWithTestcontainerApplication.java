@@ -8,11 +8,13 @@ import com.example.springboot_with_testcontainer.repository.CustomerRepository;
 import com.example.springboot_with_testcontainer.temporal.*;
 import com.example.springboot_with_testcontainer.utility.AccountNotFoundException;
 import io.grpc.Server;
+import io.temporal.api.history.v1.HistoryEvent;
 import io.temporal.api.workflowservice.v1.ListWorkflowExecutionsRequest;
 import io.temporal.api.workflowservice.v1.ListWorkflowExecutionsResponse;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowClientOptions;
 import io.temporal.client.WorkflowOptions;
+import io.temporal.common.WorkflowExecutionHistory;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 import io.temporal.serviceclient.WorkflowServiceStubsOptions;
 import io.temporal.worker.WorkerFactory;
@@ -20,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
@@ -35,6 +38,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @SpringBootApplication
 public class SpringbootWithTestcontainerApplication {
@@ -44,14 +48,15 @@ public class SpringbootWithTestcontainerApplication {
 	}
 
 	@Bean
+	@ConditionalOnProperty(name = "spring.application.temporal.type", havingValue = "PROD")
 	WorkflowClient workflowClient(@Value("${spring.application.temporal.host}") String temporalServerAddress) {
 		var workflowServiceFlowService = WorkflowServiceStubsOptions.newBuilder()
 				.setTarget(temporalServerAddress) // Temporal server address
 				.build();
 
 		return WorkflowClient.newInstance(
-				WorkflowServiceStubs.newLocalServiceStubs(),
-				/*WorkflowServiceStubs.newServiceStubs(workflowServiceFlowService),*/
+				/*WorkflowServiceStubs.newLocalServiceStubs(),*/
+				WorkflowServiceStubs.newServiceStubs(workflowServiceFlowService),
 				WorkflowClientOptions.newBuilder().build());
 	}
 
@@ -224,5 +229,22 @@ class UserCreationService {
 		} else {
 			throw new IllegalStateException("No customer found for the given workflow ID");
 		}
+	}
+
+	List<?> getWorkflowEvents(String workflowId) {
+/*
+		WorkflowExecutionHistory history = workflowClient.fetchHistory(workflowId);
+		List<HistoryEvent> events = history.getEvents();
+		return events;
+*/
+		Stream<HistoryEvent> eventStream = workflowClient.streamHistory(workflowId);
+
+		var eventList = eventStream.map(historyEvent -> Map.of(
+				"eventId", historyEvent.getEventId(),
+				"eventName",historyEvent.getEventType().name(),
+				"identity", historyEvent.getWorkflowExecutionStartedEventAttributes().getIdentity()
+		)).collect(Collectors.toList());
+
+		return eventList;
 	}
 }

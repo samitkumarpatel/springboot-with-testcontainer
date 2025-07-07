@@ -5,6 +5,7 @@ spring:
   application:
     name: springboot-with-testcontainer
     temporal:
+      type: LOCAL
       host: localhost:7233
 logging:
   level:
