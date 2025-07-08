@@ -1,0 +1,36 @@
+@HOST=localhost:8080
+
+###
+POST {{HOST}}/user
+Content-Type: application/json
+
+{
+    "firstName": "John",
+    "lastName": "Doe",
+}
+
+###
+GET {{HOST}}/user/approval-queue
+
+###
+GET {{HOST}}/user/approval-queue/search?firstName=John
+
+###
+POST {{HOST}}/user/approval-queue/40bf9dc4-ff3a-4d4a-a9f0-43504aedadc5/approve
+Content-Type: application/json
+
+{
+    "approvalComments": "LOOKS GOOD, APPROVED!"
+}
+
+###
+POST {{HOST}}/user/approval-queue/40bf9dc4-ff3a-4d4a-a9f0-43504aedadc5/reject
+Content-Type: application/json
+
+{
+    "approvalComments": "Name is not valid, please check the first name and last name."
+}
+
+###
+GET {{HOST}}/user
+

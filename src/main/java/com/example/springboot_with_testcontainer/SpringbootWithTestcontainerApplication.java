@@ -14,11 +14,14 @@ import io.temporal.api.workflowservice.v1.ListWorkflowExecutionsResponse;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowClientOptions;
 import io.temporal.client.WorkflowOptions;
+import io.temporal.common.SearchAttributeKey;
+import io.temporal.common.SearchAttributes;
 import io.temporal.common.WorkflowExecutionHistory;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 import io.temporal.serviceclient.WorkflowServiceStubsOptions;
 import io.temporal.worker.WorkerFactory;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -120,9 +123,18 @@ public class SpringbootWithTestcontainerApplication {
 												.flatMap(userCreationService::createUser)
 												.flatMap(ServerResponse.ok()::bodyValue))
 						.GET("/approval-queue", request -> Mono.fromCallable(userCreationService::getAllUserCreationWorkflowIds).flatMap(ServerResponse.ok()::bodyValue))
+						.GET("/approval-queue/search", request -> Mono.fromCallable(() -> userCreationService.getWorkflowBySearchQuery(request.queryParam("firstName").orElse(""))).flatMap(ServerResponse.ok()::bodyValue))
 						.GET("/approval-queue/{id}", request -> Mono.fromCallable(() -> userCreationService.getUserInApprovalQueueByWorkflowId(request.pathVariable("id"))).flatMap(ServerResponse.ok()::bodyValue))
-						.POST("/approval-queue/{id}/approve", request -> Mono.fromRunnable(() -> userCreationService.approveUser(request.pathVariable("id"))).then(ServerResponse.ok().build()))
-						.POST("/approval-queue/{id}/reject", request -> Mono.fromRunnable(() -> userCreationService.rejectUser(request.pathVariable("id"))).then(ServerResponse.ok().build()))
+						.POST("/approval-queue/{id}/approve", request -> request
+										.bodyToMono(Customer.class)
+										.flatMap(customer -> Mono.fromRunnable(() -> userCreationService.approveUser(customer, request.pathVariable("id"))))
+										.then(ServerResponse.ok().build())
+						)
+						.POST("/approval-queue/{id}/reject", request -> request
+								.bodyToMono(Customer.class)
+								.flatMap(customer -> Mono.fromRunnable(() -> userCreationService.rejectUser(customer, request.pathVariable("id"))))
+								.then(ServerResponse.ok().build())
+						)
 				)
 				.build();
 	}
@@ -158,6 +170,7 @@ class TransferService {
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 class UserCreationService {
 	final WorkflowClient workflowClient;
 
@@ -170,6 +183,10 @@ class UserCreationService {
 						WorkflowOptions.newBuilder()
 								.setTaskQueue("USER_CREATION_TASK_QUEUE")
 								.setWorkflowId(uuid)
+								.setTypedSearchAttributes(SearchAttributes.newBuilder()
+										.set(SearchAttributeKey.forKeyword("FirstName"), customer.firstName())
+										.set(SearchAttributeKey.forKeyword("LastName"), customer.lastName())
+										.build())
 								.build()
 				);
 		return Mono
@@ -182,6 +199,7 @@ class UserCreationService {
 				);
 	}
 
+	@Deprecated(since = "2.0.0", forRemoval = true)
 	void approveUser(String id) {
 		UserCreationWorkflow userCreationWorkflow = workflowClient.newWorkflowStub(UserCreationWorkflow.class, id);
 		Customer customer = userCreationWorkflow.getCustomer();
@@ -192,6 +210,17 @@ class UserCreationService {
 		}
 	}
 
+	void approveUser(Customer customer, String id) {
+		UserCreationWorkflow userCreationWorkflow = workflowClient.newWorkflowStub(UserCreationWorkflow.class, id);
+		Customer c = userCreationWorkflow.getCustomer();
+		if (c != null) {
+			userCreationWorkflow.approved(c.toBuilder().approvalComments(customer.approvalComments()).build());
+		} else {
+			throw new IllegalStateException("No customer found for approval");
+		}
+	}
+
+	@Deprecated(since = "2.0.0", forRemoval = true)
 	void rejectUser(String id) {
 		UserCreationWorkflow userCreationWorkflow = workflowClient.newWorkflowStub(UserCreationWorkflow.class, id);
 		Customer customer = userCreationWorkflow.getCustomer();
@@ -202,11 +231,40 @@ class UserCreationService {
 		}
 	}
 
+	void rejectUser(Customer customer, String id) {
+		UserCreationWorkflow userCreationWorkflow = workflowClient.newWorkflowStub(UserCreationWorkflow.class, id);
+		Customer customerInWorkflow = userCreationWorkflow.getCustomer();
+		if (customerInWorkflow != null) {
+			userCreationWorkflow.rejected(customerInWorkflow.toBuilder().approvalComments(customer.approvalComments()).build());
+		} else {
+			throw new IllegalStateException("No customer found for approval");
+		}
+	}
+
 	List<String> getAllUserCreationWorkflowIds() {
 		ListWorkflowExecutionsRequest listWorkflowExecutionRequest =
 				ListWorkflowExecutionsRequest.newBuilder()
 						.setNamespace(workflowClient.getOptions().getNamespace())
 						.setQuery("WorkflowType='UserCreationWorkflow' AND ExecutionStatus='Running'")
+						.build();
+		ListWorkflowExecutionsResponse listWorkflowExecutionsResponse = workflowClient
+				.getWorkflowServiceStubs()
+				.blockingStub()
+				.listWorkflowExecutions(listWorkflowExecutionRequest);
+
+
+		return listWorkflowExecutionsResponse
+				.getExecutionsList()
+				.stream()
+				.map(e -> e.getExecution().getWorkflowId())
+				.toList();
+	}
+
+	List<String> getWorkflowBySearchQuery(String firstName) {
+		ListWorkflowExecutionsRequest listWorkflowExecutionRequest =
+				ListWorkflowExecutionsRequest.newBuilder()
+						.setNamespace(workflowClient.getOptions().getNamespace())
+						.setQuery("WorkflowType='UserCreationWorkflow' AND FirstName='"+ firstName+"'")
 						.build();
 		ListWorkflowExecutionsResponse listWorkflowExecutionsResponse = workflowClient
 				.getWorkflowServiceStubs()

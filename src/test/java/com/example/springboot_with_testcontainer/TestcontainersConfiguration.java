@@ -72,8 +72,8 @@ class TestcontainersConfiguration {
 		// Execute your command inside the container
 
 		Map.of(
-				"AttributeOne", "Keyword",
-				"AttributeTwo", "Keyword",
+				"FirstName", "Keyword",
+				"LastName", "Keyword",
 				"AttributeThree", "Keyword",
 				"AttributeFour", "Keyword"
 		).forEach((k,v) -> {

@@ -29,7 +29,7 @@ public class UserCreationWorkflowImpl implements UserCreationWorkflow {
 
     @Override
     public void newUserFlow(Customer customer) {
-        this.customer = new Customer(customer.id(), customer.firstName(), customer.lastName());
+        this.customer = customer;
         System.out.println("Starting new user flow for: " + customer);
 
         Workflow.await(() -> completed);
